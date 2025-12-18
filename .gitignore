@@ -3,7 +3,6 @@ venv310/
 .gitignore/
 temp_dataset/
 temp_poses/
-extract_hand_landmarks.py
 # Python cache
 __pycache__/
 *.pyc
