@@ -1,0 +1,20 @@
+# Virtual environment
+venv310/
+
+temp_dataset/
+temp_poses/
+extract_hand_landmarks.py
+# Python cache
+__pycache__/
+*.pyc
+
+
+# Dataset & outputs
+iSign_videos/
+*.npy
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
