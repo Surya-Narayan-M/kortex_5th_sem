@@ -7,8 +7,8 @@ import os
 # =====================
 # CONFIG
 # =====================
-VIDEO_DIR = "temp_dataset"
-OUT_DIR   = "temp_poses"
+VIDEO_DIR = "iSign_videos/train"
+OUT_DIR   = "iSign_videos/landmarks/train"
 
 MAX_HANDS = 2
 FPS_SKIP  = 3   # <- safer for 128k videos (~8–10 FPS)
