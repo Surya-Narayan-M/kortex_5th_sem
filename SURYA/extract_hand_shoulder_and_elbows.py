@@ -3,38 +3,20 @@ import numpy as np
 import mediapipe as mp
 from tqdm import tqdm
 import os
+from multiprocessing import Pool, cpu_count, Manager
+from functools import partial
 
 # =====================
 # CONFIG
 # =====================
-VIDEO_DIR = "iSign_videos/train"
-OUT_DIR   = "iSign_videos/landmarks/train"
+VIDEO_DIR = "E:\iSign-videos_v1.1"
+OUT_DIR   = "E:\5thsem el\output"
 
 MAX_HANDS = 2
 FPS_SKIP  = 3   # ~8–10 FPS effective
+NUM_WORKERS = max(1, cpu_count() - 1)  # Leave 1 core free
 
 os.makedirs(OUT_DIR, exist_ok=True)
-
-# =====================
-# MediaPipe Setup
-# =====================
-mp_hands = mp.solutions.hands
-mp_pose  = mp.solutions.pose
-
-hands = mp_hands.Hands(
-    static_image_mode=False,
-    max_num_hands=MAX_HANDS,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
-
-pose = mp_pose.Pose(
-    static_image_mode=False,
-    model_complexity=0,      # lightweight
-    smooth_landmarks=False,  # faster
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
 
 # =====================
 # Extraction Function
