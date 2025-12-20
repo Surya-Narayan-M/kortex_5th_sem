@@ -178,8 +178,8 @@ class VocabularyBuilder:
 
 def main():
     """Build vocabulary from iSign dataset"""
-    csv_path = "E:/5thsem el/kortex_5th_sem/iSign_v1.1.csv"
-    output_path = "E:/5thsem el/kortex_5th_sem/vocabulary.json"
+    csv_path = "../data/iSign_v1.1.csv"
+    output_path = "vocabulary.pkl"
     
     print("🚀 Building Vocabulary for Sign Language Recognition")
     print("="*60)

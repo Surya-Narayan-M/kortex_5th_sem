@@ -228,6 +228,11 @@ def validate(model, loader, criterion, device, vocab):
             # Decode predictions (simple greedy)
             for i in range(len(preds)):
                 pred_indices = preds[i].cpu().numpy()
+                
+                # Skip if text is NaN or not a string
+                if not isinstance(texts[i], str):
+                    continue
+                    
                 target_text = texts[i].lower()
                 
                 # Simple CTC decode (remove blanks and duplicates)
@@ -284,7 +289,11 @@ def main():
     # Load dataset
     print(f"\nLoading dataset from {config.csv_path}...")
     df = pd.read_csv(config.csv_path)
-    print(f"Total samples: {len(df)}")
+    
+    # Filter out rows with NaN text
+    df = df.dropna(subset=['text', 'uid'])
+    df = df[df['text'].str.strip() != '']
+    print(f"Total valid samples: {len(df)}")
     
     # Split data
     indices = np.random.permutation(len(df))
@@ -332,7 +341,7 @@ def main():
     
     # Learning rate scheduler
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, verbose=True
+        optimizer, mode='min', factor=0.5, patience=5
     )
     
     # Training history
