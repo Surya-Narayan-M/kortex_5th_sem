@@ -11,7 +11,7 @@ kortex/
 # Dataset & outputs
 iSign_videos/
 *.npy
-iSign_v1.1.csv
+
 # OS / IDE
 .DS_Store
 Thumbs.db
