@@ -94,10 +94,11 @@ class TrainConfig:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     use_amp = True  # Mixed precision
     
-    # Data loading - use workers on Windows with proper spawn
-    num_workers = 4  # Enable multiprocessing for faster data loading
+    # Data loading - use workers for parallel loading
+    num_workers = 4  # Parallel data loading - big speedup!
     pin_memory = True
-    prefetch_factor = 2  # Prefetch batches
+    prefetch_factor = 2  # Prefetch batches ahead
+    persistent_workers = True  # Keep workers alive between epochs
     
     # Logging
     log_interval = 50  # batches - more frequent updates
@@ -446,21 +447,23 @@ class Trainer:
             max_tgt_len=self.config.max_tgt_len
         )
         
-        # Create dataloaders with prefetching for speed
-        loader_kwargs = {
-            'num_workers': self.config.num_workers,
-            'pin_memory': self.config.pin_memory,
-            'persistent_workers': True if self.config.num_workers > 0 else False,
-            'prefetch_factor': 2 if self.config.num_workers > 0 else None,
-        }
+        # Create dataloaders with parallel loading
+        worker_kwargs = {}
+        if self.config.num_workers > 0:
+            worker_kwargs = {
+                'prefetch_factor': self.config.prefetch_factor,
+                'persistent_workers': self.config.persistent_workers
+            }
         
         self.train_loader = DataLoader(
             self.train_dataset, 
             batch_size=self.config.batch_size,
             shuffle=True,
             collate_fn=collate_fn,
+            num_workers=self.config.num_workers,
+            pin_memory=self.config.pin_memory,
             drop_last=True,
-            **loader_kwargs
+            **worker_kwargs
         )
         
         self.val_loader = DataLoader(
@@ -468,7 +471,9 @@ class Trainer:
             batch_size=self.config.batch_size * 2,  # Larger for validation
             shuffle=False,
             collate_fn=collate_fn,
-            **loader_kwargs
+            num_workers=self.config.num_workers,
+            pin_memory=self.config.pin_memory,
+            **worker_kwargs
         )
     
     def create_optimizer(self):
