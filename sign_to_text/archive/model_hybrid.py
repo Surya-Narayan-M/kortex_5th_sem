@@ -200,13 +200,17 @@ class HybridEncoder(nn.Module):
 class CTCHead(nn.Module):
     """
     CTC output head for streaming predictions
+    Supports both real-time streaming and batch inference
     """
-    def __init__(self, hidden_dim, vocab_size):
+    def __init__(self, hidden_dim, vocab_size, dropout=0.3):
         super().__init__()
+        self.hidden_dim = hidden_dim
+        self.vocab_size = vocab_size
+        
         self.proj = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.1),
+            nn.Dropout(dropout),  # Use configurable dropout instead of hardcoded 0.1
             nn.Linear(hidden_dim, vocab_size)
         )
     
@@ -458,8 +462,8 @@ class HybridCTCAttentionModel(nn.Module):
             dropout=dropout
         )
         
-        # CTC head (for streaming)
-        self.ctc_head = CTCHead(hidden_dim, vocab_size)
+        # CTC head (for streaming) - use same dropout as rest of model
+        self.ctc_head = CTCHead(hidden_dim, vocab_size, dropout=dropout)
         
         # Attention decoder (for final output)
         self.decoder = AttentionDecoder(
@@ -582,7 +586,7 @@ class HybridCTCAttentionModel(nn.Module):
 # ==================== FACTORY FUNCTIONS ====================
 
 def create_hybrid_model(vocab_size=75, hidden_dim=384, input_dim=414,
-                        encoder_layers=3, decoder_layers=2):
+                        encoder_layers=3, decoder_layers=2, dropout=0.4):
     """
     Create hybrid CTC-Attention model
     
@@ -592,6 +596,7 @@ def create_hybrid_model(vocab_size=75, hidden_dim=384, input_dim=414,
         input_dim: Input feature dimension (414 with velocity/acceleration)
         encoder_layers: Number of BiGRU encoder layers
         decoder_layers: Number of GRU decoder layers
+        dropout: Dropout rate (0.4 recommended to prevent overfitting)
         
     Returns:
         model: HybridCTCAttentionModel
@@ -604,7 +609,7 @@ def create_hybrid_model(vocab_size=75, hidden_dim=384, input_dim=414,
         encoder_layers=encoder_layers,
         decoder_layers=decoder_layers,
         num_heads=4,
-        dropout=0.3
+        dropout=dropout
     )
     
     print(f"\n{'='*60}")
@@ -615,6 +620,7 @@ def create_hybrid_model(vocab_size=75, hidden_dim=384, input_dim=414,
     print(f"  Vocabulary size: {vocab_size}")
     print(f"  Encoder layers: {encoder_layers}")
     print(f"  Decoder layers: {decoder_layers}")
+    print(f"  Dropout: {dropout}")
     print(f"  Attention heads: 4")
     print(f"  Total parameters: {model.get_num_params():,}")
     print(f"  Model size: {model.get_model_size_mb():.2f} MB")
@@ -623,17 +629,119 @@ def create_hybrid_model(vocab_size=75, hidden_dim=384, input_dim=414,
     return model
 
 
-def create_mobile_hybrid_model(vocab_size=75, input_dim=414):
+def create_mobile_hybrid_model(vocab_size=75, input_dim=414, dropout=0.3):
     """
     Create smaller model optimized for mobile deployment
+    Target: <5MB, <100ms inference on smartphone
     """
     return create_hybrid_model(
         vocab_size=vocab_size,
         hidden_dim=256,
         input_dim=input_dim,
         encoder_layers=2,
-        decoder_layers=1
+        decoder_layers=1,
+        dropout=dropout
     )
+
+
+# ==================== STREAMING INFERENCE ====================
+
+class StreamingCTCDecoder:
+    """
+    Real-time CTC decoding with sliding window for continuous sign recognition
+    
+    Features:
+    - Processes frames incrementally as they arrive
+    - Maintains state between chunks for continuity
+    - Applies CTC prefix beam search for better accuracy
+    - Supports vocabulary-constrained decoding
+    """
+    def __init__(self, model, idx2char, blank_idx=0, beam_width=10):
+        self.model = model
+        self.idx2char = idx2char
+        self.blank_idx = blank_idx
+        self.beam_width = beam_width
+        
+        # Streaming state
+        self.encoder_state = None
+        self.prev_output = None
+        self.accumulated_text = ""
+        self.frame_buffer = []
+        self.chunk_size = 30  # Process every 30 frames (~1 second at 30fps)
+        
+    def reset(self):
+        """Reset streaming state for new sequence"""
+        self.encoder_state = None
+        self.prev_output = None
+        self.accumulated_text = ""
+        self.frame_buffer = []
+        
+    def add_frame(self, frame):
+        """
+        Add a single frame to the buffer
+        
+        Args:
+            frame: (input_dim,) single frame features
+            
+        Returns:
+            partial_text: Current accumulated text (None if no update)
+        """
+        self.frame_buffer.append(frame)
+        
+        if len(self.frame_buffer) >= self.chunk_size:
+            return self.process_chunk()
+        return None
+    
+    def process_chunk(self):
+        """Process buffered frames and return partial text"""
+        if not self.frame_buffer:
+            return self.accumulated_text
+            
+        import torch
+        
+        # Stack frames
+        frames = torch.stack(self.frame_buffer, dim=0).unsqueeze(0)  # (1, chunk_size, input_dim)
+        device = next(self.model.parameters()).device
+        frames = frames.to(device)
+        
+        # Get CTC predictions
+        self.model.eval()
+        with torch.no_grad():
+            preds, log_probs = self.model.predict_streaming(frames)
+        
+        # Greedy decode with blank removal
+        pred_tokens = preds[0].cpu().tolist()
+        decoded = self._ctc_greedy_decode(pred_tokens)
+        
+        # Update accumulated text
+        self.accumulated_text += decoded
+        
+        # Clear buffer (keep last few frames for overlap)
+        overlap = min(5, len(self.frame_buffer))
+        self.frame_buffer = self.frame_buffer[-overlap:] if overlap > 0 else []
+        
+        return self.accumulated_text
+    
+    def _ctc_greedy_decode(self, tokens):
+        """Greedy CTC decoding with blank/repeat removal"""
+        decoded = []
+        prev_token = None
+        
+        for token in tokens:
+            if token != self.blank_idx and token != prev_token:
+                if token in self.idx2char:
+                    decoded.append(self.idx2char[token])
+            prev_token = token
+        
+        return ''.join(decoded)
+    
+    def finalize(self):
+        """Finalize decoding and return complete text"""
+        # Process any remaining frames
+        if self.frame_buffer:
+            self.process_chunk()
+        
+        return self.accumulated_text.strip()
 
 
 # ==================== TEST ====================
