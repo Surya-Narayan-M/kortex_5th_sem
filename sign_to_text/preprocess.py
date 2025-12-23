@@ -12,6 +12,7 @@ Features:
 """
 
 import numpy as np
+import h5py
 from scipy.ndimage import gaussian_filter1d
 from pathlib import Path
 from tqdm import tqdm
@@ -232,8 +233,10 @@ def process_single_video(args):
             smooth=True
         )
         
-        # Save preprocessed features
-        np.save(output_path, features.astype(np.float32))
+        # Save preprocessed features as HDF5 for faster training I/O
+        # Store dataset under key 'features' and enable gzip compression
+        with h5py.File(output_path, 'w') as hf:
+            hf.create_dataset('features', data=features.astype(np.float32), compression='gzip', compression_opts=4)
         
         return None
         
@@ -249,14 +252,15 @@ def preprocess_all_landmarks():
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Get all .npy files
+    # Get all raw .npy landmark files
     npy_files = sorted(list(input_dir.glob("*.npy")))
     print(f"Found {len(npy_files)} landmark files")
     
     # Prepare tasks (skip already processed)
     tasks = []
     for input_path in npy_files:
-        output_path = output_dir / input_path.name
+        # Save outputs as .h5 (same stem as input)
+        output_path = output_dir / (input_path.stem + '.h5')
         if not output_path.exists():
             tasks.append((input_path, output_path))
     
@@ -285,15 +289,17 @@ def preprocess_all_landmarks():
         if len(errors) > 10:
             print(f"  ... and {len(errors) - 10} more")
     
-    # Verify output
-    output_files = list(output_dir.glob("*.npy"))
+    # Verify output (.h5)
+    output_files = list(output_dir.glob("*.h5"))
     print(f"\n✅ Preprocessing complete!")
     print(f"   Output directory: {output_dir}")
     print(f"   Total files: {len(output_files)}")
     
     # Show sample stats
     if output_files:
-        sample = np.load(output_files[0])
+        # Read dataset 'features' from HDF5
+        with h5py.File(output_files[0], 'r') as hf:
+            sample = hf['features'][()]
         print(f"   Feature dimension: {sample.shape[1]}")
         print(f"   Sample sequence length: {sample.shape[0]}")
 

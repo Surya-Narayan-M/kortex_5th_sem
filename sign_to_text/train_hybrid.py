@@ -29,6 +29,7 @@ from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.amp import autocast
 from tqdm import tqdm
 import logging
+import h5py
 
 # Setup logging
 logging.basicConfig(
@@ -140,11 +141,20 @@ class SignLanguageDataset(Dataset):
         self.samples = []
         for _, row in self.df.iterrows():
             uid = str(row['uid'])
+            # Support per-sample HDF5 (.h5) outputs, fall back to .npy
+            h5_path = self.data_dir / f"{uid}.h5"
             npy_path = self.data_dir / f"{uid}.npy"
-            if npy_path.exists():
+            if h5_path.exists():
+                path = h5_path
+            elif npy_path.exists():
+                path = npy_path
+            else:
+                path = None
+
+            if path is not None:
                 self.samples.append({
                     'video_id': uid,
-                    'path': npy_path,
+                    'path': path,
                     'label': str(row['text']).lower().strip()
                 })
         
@@ -179,8 +189,14 @@ class SignLanguageDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.samples[idx]
         
-        # Load landmarks
-        landmarks = np.load(sample['path'])
+        # Load landmarks (support .h5 per-sample or .npy)
+        path = Path(sample['path'])
+        if path.suffix == '.h5':
+            with h5py.File(path, 'r') as hf:
+                # dataset key is 'features' written by the preprocessor
+                landmarks = hf['features'][()]
+        else:
+            landmarks = np.load(path)
         
         # Truncate if too long
         if len(landmarks) > self.max_src_len:
