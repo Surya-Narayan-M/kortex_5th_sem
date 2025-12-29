@@ -29,13 +29,14 @@ class Config:
     output_dir = "checkpoints"
     
     # Model
-    hidden_dim = 128  # 128 for speed, 256 for accuracy
+    hidden_dim = 256  # 256 for better accuracy on complex data
+    num_layers = 2  # 2-layer BiGRU for complex temporal modeling
     vocab_size = 5004  # Will be updated from vocabulary
     
     # Training
     batch_size = 16
-    num_epochs = 40
-    learning_rate = 1e-4
+    num_epochs = 80  # Extended training for better convergence
+    learning_rate = 5e-4  # Reduced for stability with deeper model
     weight_decay = 1e-5
     
     # Data
@@ -331,7 +332,11 @@ def main():
     
     # Create model
     print(f"\nCreating model...")
-    model = create_mobile_model(vocab_size=config.vocab_size, hidden_dim=config.hidden_dim)
+    model = create_mobile_model(
+        vocab_size=config.vocab_size, 
+        hidden_dim=config.hidden_dim,
+        num_layers=config.num_layers
+    )
     model = model.to(config.device)
     
     # Optimizer and loss
@@ -339,9 +344,9 @@ def main():
                            weight_decay=config.weight_decay)
     criterion = nn.CTCLoss(blank=0, zero_infinity=True)
     
-    # Learning rate scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5
+    # Learning rate scheduler - Cosine annealing with warm restarts
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=10, T_mult=2, eta_min=1e-6
     )
     
     # Training history
@@ -370,8 +375,8 @@ def main():
         # Validate
         val_loss, val_acc = validate(model, val_loader, criterion, config.device, vocab)
         
-        # Update scheduler
-        scheduler.step(val_loss)
+        # Update scheduler (cosine annealing uses epoch, not loss)
+        scheduler.step()
         current_lr = optimizer.param_groups[0]['lr']
         
         # Log

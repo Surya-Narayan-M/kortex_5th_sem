@@ -300,8 +300,8 @@ class RealtimeSignRecognition:
 def main():
     """Main test function"""
     # Paths
-    model_path = "E:/5thsem el/kortex_5th_sem/models/best_model.pth"
-    vocab_path = "E:/5thsem el/kortex_5th_sem/vocabulary.json"
+    model_path = "checkpoints/best_model.pth"
+    vocab_path = "vocabulary.pkl"
     
     # Device
     device = "cuda" if torch.cuda.is_available() else "cpu"

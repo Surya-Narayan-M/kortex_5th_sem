@@ -83,23 +83,45 @@ class VocabularyBuilder:
         print(f"Vocabulary covers {coverage:.2f}% of all word occurrences")
     
     def _build_char_vocab(self):
-        """Build character-level vocabulary (for fallback)"""
+        """Build character-level vocabulary for Seq2Seq model"""
         print("\nBuilding character vocabulary...")
         
-        # Special tokens
-        self.char2idx[self.BLANK] = 0
-        self.char2idx[self.SPACE] = 1
+        # Special tokens (order matters for Seq2Seq!)
+        # 0: PAD (for padding sequences)
+        # 1: SOS (start of sequence)
+        # 2: EOS (end of sequence)
+        # 3: UNK (unknown character)
+        # 4: SPACE (whitespace)
         
-        self.idx2char[0] = self.BLANK
-        self.idx2char[1] = self.SPACE
+        self.char2idx = {
+            '<pad>': 0,
+            '<sos>': 1,
+            '<eos>': 2,
+            '<unk>': 3,
+            ' ': 4,  # Space character
+        }
         
-        # Add all printable characters
-        chars = "abcdefghijklmnopqrstuvwxyz0123456789.,!?'-:;\"()"
-        for idx, char in enumerate(chars, start=2):
-            self.char2idx[char] = idx
-            self.idx2char[idx] = char
+        # Add lowercase letters (5-30)
+        for i, c in enumerate('abcdefghijklmnopqrstuvwxyz'):
+            self.char2idx[c] = 5 + i
+        
+        # Add digits (31-40)
+        for i, c in enumerate('0123456789'):
+            self.char2idx[c] = 31 + i
+        
+        # Add punctuation (41+)
+        punctuation = ".,!?'-:;\"()[]{}@#$%&*+=/<>\\|~`^_"
+        for i, c in enumerate(punctuation):
+            self.char2idx[c] = 41 + i
+        
+        # Build reverse mapping
+        self.idx2char = {v: k for k, v in self.char2idx.items()}
         
         print(f"Character vocabulary size: {len(self.char2idx)}")
+        print(f"  Special tokens: PAD(0), SOS(1), EOS(2), UNK(3), SPACE(4)")
+        print(f"  Letters: a-z (5-30)")
+        print(f"  Digits: 0-9 (31-40)")
+        print(f"  Punctuation: (41-{40 + len(punctuation)})")
     
     def text_to_word_indices(self, text, max_length=50):
         """Convert text to word indices"""
@@ -110,7 +132,8 @@ class VocabularyBuilder:
     def text_to_char_indices(self, text, max_length=200):
         """Convert text to character indices"""
         text = str(text).lower()[:max_length]
-        indices = [self.char2idx.get(c, self.char2idx[self.SPACE]) for c in text]
+        unk_idx = self.char2idx.get(self.UNK, 3)  # Use UNK for unknown chars
+        indices = [self.char2idx.get(c, unk_idx) for c in text]
         return indices
     
     def indices_to_text(self, indices, mode='word'):

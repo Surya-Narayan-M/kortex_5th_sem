@@ -45,18 +45,26 @@ class MobileSignLanguageModel(nn.Module):
             # nn.MaxPool1d(kernel_size=2, stride=2)  # Uncomment for 2x speed
         )
         
-        # BiGRU Encoder (lightweight: 1 layer, faster than LSTM)
+        # BiGRU Encoder (2 layers for complex temporal modeling)
         self.gru = nn.GRU(
             input_size=hidden_dim,
             hidden_size=hidden_dim // 2,  # Divided by 2 because bidirectional
             num_layers=num_layers,
             batch_first=True,
             bidirectional=True,
-            dropout=0.0  # No dropout for single layer
+            dropout=0.2 if num_layers > 1 else 0.0  # Dropout between layers
         )
         
-        # CTC Output Layer
-        self.ctc_head = nn.Linear(hidden_dim, vocab_size)
+        # Layer normalization for training stability
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+        
+        # CTC Output Layer (deeper projection for complex feature learning)
+        self.ctc_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, vocab_size)
+        )
         
     def forward(self, x, lengths=None):
         """
@@ -73,19 +81,25 @@ class MobileSignLanguageModel(nn.Module):
         
         # CNN expects (batch, channels, time)
         x = x.permute(0, 2, 1)  # (batch, features, frames)
-        x = self.cnn(x)
-        x = x.permute(0, 2, 1)  # (batch, frames, hidden_dim)
+        cnn_out = self.cnn(x)
+        x = cnn_out.permute(0, 2, 1)  # (batch, frames, hidden_dim)
         
         # BiGRU
         if lengths is not None:
             # Pack for variable length sequences
-            x = nn.utils.rnn.pack_padded_sequence(
+            packed_x = nn.utils.rnn.pack_padded_sequence(
                 x, lengths.cpu(), batch_first=True, enforce_sorted=False
             )
-            x, _ = self.gru(x)
-            x, _ = nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
+            gru_out, _ = self.gru(packed_x)
+            gru_out, _ = nn.utils.rnn.pad_packed_sequence(gru_out, batch_first=True)
         else:
-            x, _ = self.gru(x)
+            gru_out, _ = self.gru(x)
+        
+        # Residual connection (helps gradient flow with deeper network)
+        x = gru_out + x
+        
+        # Layer normalization (stabilizes training)
+        x = self.layer_norm(x)
         
         # CTC output
         logits = self.ctc_head(x)  # (batch, frames, vocab_size)
